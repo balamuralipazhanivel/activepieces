@@ -1,130 +1,66 @@
-import { FlowExecutor } from '../executors/flow-executor'
-import { VariableService } from '../services/variable-service'
-import { ExecutionState, BranchAction, Action, BranchStepOutput, BranchCondition, BranchOperator, BranchResumeStepMetadata, ActionType, BranchActionSettings, ExecutionOutputStatus } from '@activepieces/shared'
-import { BaseActionHandler, ExecuteActionOutput, ExecuteContext, InitStepOutputParams } from './action-handler'
-import { StepOutputStatus } from '@activepieces/shared'
+import { ActionType, BranchAction, BranchActionSettings, BranchCondition, BranchOperator, StepOutputStatus } from '@activepieces/shared'
+import { BaseExecutor } from './base-executor'
+import { EngineConstantData, ExecutionVerdict, FlowExecutorContext } from './context/flow-execution-context'
+import { flowExecutorNew } from './flow-executor'
+import { variableService } from '../services/variable-service'
 
-type CtorParams = {
-    currentAction: BranchAction
-    onSuccessAction?: Action
-    onFailureAction?: Action
-    nextAction?: Action
-    resumeStepMetadata?: BranchResumeStepMetadata
-}
 
-export class BranchActionHandler extends BaseActionHandler<BranchAction, BranchResumeStepMetadata> {
-    onSuccessAction?: Action
-    onFailureAction?: Action
-    variableService: VariableService
-
-    constructor({ currentAction, onSuccessAction, onFailureAction, nextAction, resumeStepMetadata }: CtorParams) {
-        super({
-            currentAction,
-            nextAction,
-            resumeStepMetadata,
-        })
-
-        this.variableService = new VariableService()
-        this.onSuccessAction = onSuccessAction
-        this.onFailureAction = onFailureAction
-    }
-
-    /**
-   * initializes an empty branch step output
-   */
-    protected override async initStepOutput({ executionState }: InitStepOutputParams): Promise<BranchStepOutput> {
-        const censoredInput = await this.variableService.resolve({
-            unresolvedInput: {
-                conditions: this.currentAction.settings.conditions,
-            },
+export const branchExecutor: BaseExecutor<BranchAction> = {
+    async handle({
+        action,
+        executionState,
+        constants,
+    }: {
+        action: BranchAction
+        executionState: FlowExecutorContext
+        constants: EngineConstantData
+    }) {
+        const { censoredInput, resolvedInput } = await variableService.resolve<BranchActionSettings>({
+            unresolvedInput: action.settings,
             executionState,
-            logs: true,
         })
-
-        const newStepOutput: BranchStepOutput = {
-            type: ActionType.BRANCH,
-            status: StepOutputStatus.RUNNING,
-            input: censoredInput,
-        }
-
-        return newStepOutput
-    }
-
-    async execute(
-        context: ExecuteContext,
-        executionState: ExecutionState,
-        ancestors: [string, number][],
-    ): Promise<ExecuteActionOutput> {
-        const resolvedInput: BranchActionSettings = await this.variableService.resolve({
-            unresolvedInput: this.currentAction.settings,
-            executionState,
-            logs: false,
-        })
-
-        const stepOutput = await this.loadStepOutput({
-            executionState,
-            ancestors,
-        })
-
-        executionState.insertStep(stepOutput, this.currentAction.name, ancestors)
 
         try {
-            stepOutput.output = {
-                condition: stepOutput.output?.condition ?? evaluateConditions(resolvedInput.conditions),
-            }
-            stepOutput.status = StepOutputStatus.SUCCEEDED
+            const evaluatedCondition = evaluateConditions(resolvedInput.conditions)
+            let branchExecutionContext = executionState.upsertStep(action.name, {
+                type: ActionType.BRANCH,
+                status: StepOutputStatus.SUCCEEDED,
+                input: censoredInput,
+                output: {
+                    condition: evaluatedCondition,
+                },
+            })
 
-            const firstStep = stepOutput.output.condition
-                ? this.onSuccessAction
-                : this.onFailureAction
-
-            if (firstStep) {
-                const executor = new FlowExecutor({
-                    flowVersion: context.flowVersion,
-                    executionState,
-                    firstStep,
-                    resumeStepMetadata: this.resumeStepMetadata?.childResumeStepMetadata,
+            if (!evaluatedCondition && action.onFailureAction) {
+                branchExecutionContext = await flowExecutorNew.execute({
+                    action: action.onFailureAction,
+                    executionState: branchExecutionContext,
+                    constants,
                 })
-
-                const executionOutput = await executor.execute({
-                    ancestors,
+            }
+            if (evaluatedCondition && action.onSuccessAction) {
+                branchExecutionContext = await flowExecutorNew.execute({
+                    action: action.onSuccessAction,
+                    executionState: branchExecutionContext,
+                    constants,
                 })
-                if (executionOutput.status !== ExecutionOutputStatus.SUCCEEDED) {
-                    stepOutput.status = StepOutputStatus.SUCCEEDED
-                    executionState.insertStep(stepOutput, this.currentAction.name, ancestors)
-                    return {
-                        stepOutput,
-                        executionOutputStatus: executionOutput.status,
-                        pauseMetadata: this.convertToPauseMetadata(executionOutput),
-                        stopResponse: this.convertToStopResponse(executionOutput),
-                    }
-                }
             }
 
-            executionState.insertStep(stepOutput, this.currentAction.name, ancestors)
-
-            return {
-                stepOutput,
-                executionOutputStatus: this.convertExecutionStatusToStepStatus(stepOutput.status),
-                pauseMetadata: undefined,
-                stopResponse: undefined,
-            }
+            return branchExecutionContext
         }
         catch (e) {
             console.error(e)
-
-            stepOutput.status = StepOutputStatus.FAILED
-            stepOutput.errorMessage = (e as Error).message
-
-            return {
-                stepOutput,
-                executionOutputStatus: this.convertExecutionStatusToStepStatus(stepOutput.status),
-                pauseMetadata: undefined,
-                stopResponse: undefined,
+            const stepOutput = {
+                type: ActionType.BRANCH,
+                status: StepOutputStatus.FAILED,
+                input: censoredInput,
+                errorMessage: (e as Error).message,
             }
+            return executionState.upsertStep(action.name, stepOutput).setVerdict(ExecutionVerdict.FAILED)
         }
-    }
+    },
 }
+
 
 function evaluateConditions(conditionGroups: BranchCondition[][]): boolean {
     let orOperator = false
@@ -149,13 +85,13 @@ function evaluateConditions(conditionGroups: BranchCondition[][]): boolean {
                 }
                 case BranchOperator.TEXT_EXACTLY_MATCHES: {
                     const firstValueExactlyMatches = toLowercaseIfCaseInsensitive(castedCondition.firstValue, castedCondition.caseSensitive) ===
-            toLowercaseIfCaseInsensitive(castedCondition.secondValue, castedCondition.caseSensitive)
+                        toLowercaseIfCaseInsensitive(castedCondition.secondValue, castedCondition.caseSensitive)
                     andGroup = andGroup && firstValueExactlyMatches
                     break
                 }
                 case BranchOperator.TEXT_DOES_NOT_EXACTLY_MATCH: {
                     const firstValueDoesNotExactlyMatch = toLowercaseIfCaseInsensitive(castedCondition.firstValue, castedCondition.caseSensitive) !==
-            toLowercaseIfCaseInsensitive(castedCondition.secondValue, castedCondition.caseSensitive)
+                        toLowercaseIfCaseInsensitive(castedCondition.secondValue, castedCondition.caseSensitive)
                     andGroup = andGroup && firstValueDoesNotExactlyMatch
                     break
                 }

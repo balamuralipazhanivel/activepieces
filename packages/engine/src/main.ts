@@ -1,6 +1,4 @@
 import { argv } from 'node:process'
-import { FlowExecutor } from './lib/executors/flow-executor'
-import { globals } from './lib/globals'
 import {
     EngineOperationType,
     ExecutePropsOptions,
@@ -11,92 +9,68 @@ import {
     EngineResponse,
     EngineResponseStatus,
     TriggerHookType,
-    ExecutionType,
-    StepOutput,
     ExecuteCodeOperation,
     ExecuteExtractPieceMetadata,
     ExecuteValidateAuthOperation,
-    flowHelper,
-    EngineTestOperation,
+    FinishExecutionOutput,
+    ExecutionOutputStatus,
+    ActionType,
+    StepOutputStatus,
+    assertNotNullOrUndefined,
+    ExecutionType,
 } from '@activepieces/shared'
 import { pieceHelper } from './lib/helper/piece-helper'
 import { triggerHelper } from './lib/helper/trigger-helper'
-import { VariableService } from './lib/services/variable-service'
-import { testExecution } from './lib/helper/test-execution-context'
-import { loggingUtils } from './lib/helper/logging-utils'
 import { utils } from './lib/utils'
+import { flowExecutorNew } from './lib/handler/flow-executor'
+import { FlowExecutorContext } from './lib/handler/context/flow-execution-context'
+import { codeExecutor } from './lib/handler/code-executor'
+import { BASE_CODE_DIRECTORY, INPUT_FILE, OUTPUT_FILE } from './lib/constants'
 
-const initFlowExecutor = (input: ExecuteFlowOperation): FlowExecutor => {
-    const { flowVersion } = input
-    const firstStep = flowVersion.trigger.nextAction
-
-    if (input.executionType === ExecutionType.RESUME) {
-        const { resumeStepMetadata } = input
-        const executionState = new ExecutionState(input.executionState)
-
-        return new FlowExecutor({
-            flowVersion,
-            executionState,
-            firstStep,
-            resumeStepMetadata,
-        })
-    }
-
-    const executionState = new ExecutionState(input.executionState)
-    const variableService = new VariableService()
-
-    const steps = flowHelper.getAllSteps(flowVersion.trigger)
-    steps.forEach(step => {
-        executionState.addConnectionTags(variableService.extractConnectionNames(step))
-    })
-
-    executionState.insertStep(input.triggerPayload as StepOutput, 'trigger', [])
-
-    return new FlowExecutor({
-        flowVersion,
-        executionState,
-        firstStep,
-    })
-}
-
-const extractPieceMetadata = async (): Promise<void> => {
-    try {
-        const input: ExecuteExtractPieceMetadata = await utils.parseJsonFile(globals.inputFile)
-        const output = await pieceHelper.extractPieceMetadata(input)
-
-        await writeOutput({
-            status: EngineResponseStatus.OK,
-            response: output,
-        })
-    }
-    catch (e) {
-        console.error(e)
-        await writeOutput({
-            status: EngineResponseStatus.ERROR,
-            response: (e as Error).message,
-        })
-    }
-}
 
 const executeFlow = async (input?: ExecuteFlowOperation): Promise<void> => {
     try {
-        input = input ?? await utils.parseJsonFile<ExecuteFlowOperation>(globals.inputFile)
+        // TODO REMOVE THIS
+        input = input ?? await utils.parseJsonFile<ExecuteFlowOperation>(INPUT_FILE)
 
-        globals.workerToken = input.workerToken!
-        globals.projectId = input.projectId
-        globals.serverUrl = input.serverUrl!
-        globals.flowRunId = input.flowRunId
+        assertNotNullOrUndefined(input.workerToken, 'workerToken')
 
-        if (input.executionType === ExecutionType.RESUME) {
-            globals.resumePayload = input.resumePayload
+        const output = await flowExecutorNew.execute({
+            action: input.flowVersion.trigger.nextAction,
+            // TODO INCLUDE All connections tags before execution so it works with failed steps
+            executionState: FlowExecutorContext.empty().upsertStep(input.flowVersion.trigger.name, {
+                output: input.triggerPayload,
+                // TODO FIX TYPE
+                type: ActionType.PIECE,
+                status: StepOutputStatus.SUCCEEDED,
+                input: {},
+            }),
+            constants: {
+                flowId: input.flowVersion.flowId,
+                flowRunId: input.flowRunId,
+                executionType: input.executionType,
+                serverUrl: input.serverUrl,
+                apiUrl: input.serverUrl,
+                projectId: input.projectId,
+                workerToken: input.workerToken,
+                resumePayload: input.executionType === ExecutionType.RESUME ? input.resumePayload : undefined,
+                baseCodeDirectory: BASE_CODE_DIRECTORY,
+            },
+        })
+        const state = new ExecutionState(undefined)
+        for (const [name, step] of Object.entries(output.steps)) {
+            state.insertStep(step, name, [])
         }
-
-        const executor = initFlowExecutor(input)
-        const output = await executor.safeExecute()
-
+        const executionOut: FinishExecutionOutput = {
+            tags: [],
+            status: ExecutionOutputStatus.SUCCEEDED,
+            tasks: 0,
+            executionState: state,
+            duration: 1000,
+        }
         await writeOutput({
             status: EngineResponseStatus.OK,
-            response: await loggingUtils.trimExecution(output),
+            response: executionOut,
         })
     }
     catch (e) {
@@ -108,13 +82,12 @@ const executeFlow = async (input?: ExecuteFlowOperation): Promise<void> => {
     }
 }
 
+
 const executeProps = async (): Promise<void> => {
     try {
-        const input: ExecutePropsOptions = await utils.parseJsonFile(globals.inputFile)
+        const input: ExecutePropsOptions = await utils.parseJsonFile(INPUT_FILE)
 
-        globals.workerToken = input.workerToken!
-        globals.projectId = input.projectId
-        globals.serverUrl = input.serverUrl
+        assertNotNullOrUndefined(input.workerToken, 'workerToken')
 
         const output = await pieceHelper.executeProps(input)
 
@@ -132,57 +105,9 @@ const executeProps = async (): Promise<void> => {
     }
 }
 
-const executeTrigger = async (): Promise<void> => {
-    try {
-        const input: ExecuteTriggerOperation<TriggerHookType> = await utils.parseJsonFile(globals.inputFile)
-
-        globals.workerToken = input.workerToken!
-        globals.projectId = input.projectId
-        globals.serverUrl = input.serverUrl
-
-        const output = await triggerHelper.executeTrigger(input)
-        await writeOutput({
-            status: EngineResponseStatus.OK,
-            response: output,
-        })
-    }
-    catch (e) {
-        console.error(e)
-        await writeOutput({
-            status: EngineResponseStatus.ERROR,
-            response: (e as Error).message,
-        })
-    }
-}
-
-const executeCode = async (): Promise<void> => {
-    try {
-        const operationInput: ExecuteCodeOperation = await utils.parseJsonFile(globals.inputFile)
-
-        globals.projectId = operationInput.projectId
-        globals.serverUrl = operationInput.serverUrl
-        const output = await pieceHelper.executeCode(operationInput)
-        await writeOutput({
-            status: EngineResponseStatus.OK,
-            response: output,
-        })
-    }
-    catch (e) {
-        console.error(e)
-        await writeOutput({
-            status: EngineResponseStatus.ERROR,
-            response: utils.tryParseJson((e as Error).message),
-        })
-    }
-}
-
 const executeAction = async (): Promise<void> => {
     try {
-        const input: ExecuteActionOperation = await utils.parseJsonFile(globals.inputFile)
-
-        globals.workerToken = input.workerToken!
-        globals.projectId = input.projectId
-        globals.serverUrl = input.serverUrl
+        const input: ExecuteActionOperation = await utils.parseJsonFile(INPUT_FILE)
 
         const output = await pieceHelper.executeAction(input)
         await writeOutput({
@@ -199,30 +124,9 @@ const executeAction = async (): Promise<void> => {
     }
 }
 
-const executeValidateAuth = async (): Promise<void> => {
-    try {
-        const input: ExecuteValidateAuthOperation = await utils.parseJsonFile(globals.inputFile)
 
-        globals.workerToken = input.workerToken!
-        globals.projectId = input.projectId
-        globals.serverUrl = input.serverUrl
-
-        const output = await pieceHelper.executeValidateAuth(input)
-
-        await writeOutput({
-            status: EngineResponseStatus.OK,
-            response: output,
-        })
-    }
-    catch (e) {
-        console.error(e)
-        await writeOutput({
-            status: EngineResponseStatus.ERROR,
-            response: utils.tryParseJson((e as Error).message),
-        })
-    }
-}
-
+// TOODO FIX
+/*
 const executeTest = async (): Promise<void> => {
     try {
         const input: EngineTestOperation = await utils.parseJsonFile(globals.inputFile)
@@ -248,44 +152,96 @@ const executeTest = async (): Promise<void> => {
         })
     }
 }
+*/
 
-async function writeOutput(result: EngineResponse<unknown>): Promise<void> {
-    await utils.writeToJsonFile(globals.outputFile, result)
-}
 
 const execute = async (): Promise<void> => {
-    const operationType = argv[2]
+    try {
+        const operationType = argv[2]
 
-    switch (operationType) {
-        case EngineOperationType.EXTRACT_PIECE_METADATA:
-            await extractPieceMetadata()
-            break
-        case EngineOperationType.EXECUTE_FLOW:
-            await executeFlow()
-            break
-        case EngineOperationType.EXECUTE_PROPERTY:
-            await executeProps()
-            break
-        case EngineOperationType.EXECUTE_TRIGGER_HOOK:
-            await executeTrigger()
-            break
-        case EngineOperationType.EXECUTE_ACTION:
-            await executeAction()
-            break
-        case EngineOperationType.EXECUTE_CODE:
-            await executeCode()
-            break
-        case EngineOperationType.EXECUTE_VALIDATE_AUTH:
-            await executeValidateAuth()
-            break
-        case EngineOperationType.EXECUTE_TEST:
-            await executeTest()
-            break
-        default:
-            console.error('unknown operation')
-            break
+        switch (operationType) {
+            case EngineOperationType.EXTRACT_PIECE_METADATA: {
+                const input: ExecuteExtractPieceMetadata = await utils.parseJsonFile(INPUT_FILE)
+                const output = await pieceHelper.extractPieceMetadata(input)
+                await utils.writeToJsonFile(OUTPUT_FILE, {
+                    status: EngineResponseStatus.OK,
+                    response: output,
+                })
+                break
+            }
+            case EngineOperationType.EXECUTE_FLOW:
+                await executeFlow()
+                break
+            case EngineOperationType.EXECUTE_PROPERTY:
+                await executeProps()
+                break
+            case EngineOperationType.EXECUTE_TRIGGER_HOOK: {
+                const input: ExecuteTriggerOperation<TriggerHookType> = await utils.parseJsonFile(INPUT_FILE)
+
+                const output = await triggerHelper.executeTrigger(input)
+                await writeOutput({
+                    status: EngineResponseStatus.OK,
+                    response: output,
+                })
+                break
+            }
+            case EngineOperationType.EXECUTE_ACTION:
+                await executeAction()
+                break
+            case EngineOperationType.EXECUTE_CODE: {
+                const input: ExecuteCodeOperation = await utils.parseJsonFile(INPUT_FILE)
+                const output = await codeExecutor.handle({
+                    action: input.step,
+                    // TODO 
+                    executionState: FlowExecutorContext.empty(),
+                    constants: {
+                        flowId: input.flowVersion.flowId,
+                        flowRunId: 'test-run',
+                        projectId: input.projectId,
+                        executionType: ExecutionType.BEGIN,
+                        serverUrl: input.serverUrl,
+                        apiUrl: input.serverUrl,
+                        workerToken: input.workerToken!,
+                        baseCodeDirectory: BASE_CODE_DIRECTORY,
+                    },
+                })
+                await writeOutput({
+                    status: EngineResponseStatus.OK,
+                    response: output,
+                })
+                break
+            }
+            case EngineOperationType.EXECUTE_VALIDATE_AUTH: {
+                const input: ExecuteValidateAuthOperation = await utils.parseJsonFile(INPUT_FILE)
+                const output = await pieceHelper.executeValidateAuth(input)
+
+                await writeOutput({
+                    status: EngineResponseStatus.OK,
+                    response: output,
+                })
+                break
+            }
+            case EngineOperationType.EXECUTE_TEST:
+                // TODO RENABLE  
+                //  await executeTest()
+                break
+            default:
+                console.error('unknown operation')
+                break
+        }
+    }
+    catch (e) {
+        console.error(e)
+        await writeOutput({
+            status: EngineResponseStatus.ERROR,
+            response: utils.tryParseJson((e as Error).message),
+        })
     }
 }
 
 execute()
     .catch(e => console.error(e))
+
+async function writeOutput(result: EngineResponse<unknown>): Promise<void> {
+    await utils.writeToJsonFile(OUTPUT_FILE, result)
+}

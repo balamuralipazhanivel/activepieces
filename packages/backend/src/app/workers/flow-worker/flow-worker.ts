@@ -166,7 +166,6 @@ const loadInputAndLogFileId = async ({
             serverUrl: await getServerUrl(),
             executionType: ExecutionType.RESUME,
             executionState: executionOutput.executionState,
-            resumeStepMetadata: flowRun.pauseMetadata.resumeStepMetadata,
             resumePayload: jobData.payload,
             ...baseInput,
         },

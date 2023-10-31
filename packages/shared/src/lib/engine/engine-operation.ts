@@ -1,5 +1,4 @@
 import { AppConnectionValue } from "../app-connection/app-connection";
-import { ResumeStepMetadata } from "../flow-run/execution/execution-output";
 import { ExecutionState } from "../flow-run/execution/execution-state";
 import { ExecutionType } from "../flow-run/execution/execution-type";
 import { FlowRunId } from "../flow-run/flow-run";
@@ -38,6 +37,7 @@ export type EngineOperation =
 
 type BaseEngineOperation = {
     projectId: ProjectId
+    // TODO MAKE THIS MANADATORY
     workerToken?: string
     serverUrl: string,
 }
@@ -57,12 +57,10 @@ export type ExecuteValidateAuthOperation = BaseEngineOperation & {
 
 export type ExecuteExtractPieceMetadata = PiecePackage
 
-export type ExecuteCodeOperation = {
+export type ExecuteCodeOperation = BaseEngineOperation &  {
     step: CodeAction
-    serverUrl: string
     flowVersion: FlowVersion,
     input: Record<string, unknown>
-    projectId: ProjectId
 }
 
 export type ExecutePropsOptions = BaseEngineOperation & {
@@ -86,7 +84,6 @@ export type BeginExecuteFlowOperation = BaseExecuteFlowOperation<ExecutionType.B
 
 export type ResumeExecuteFlowOperation = BaseExecuteFlowOperation<ExecutionType.RESUME> & {
     executionState: ExecutionState,
-    resumeStepMetadata: ResumeStepMetadata,
     resumePayload: unknown,
 }
 

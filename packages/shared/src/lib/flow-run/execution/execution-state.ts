@@ -12,6 +12,7 @@ type AdjustTaskCountParams = {
   stepOutput: StepOutput
 }
 
+// TODO CLEAN AND TURN ITNO TYPE 
 export class ExecutionState {
   private _taskCount = 0
   private _tags: string[] = [];

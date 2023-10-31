@@ -26,7 +26,7 @@ export const triggerHelper = {
         const variableService = new VariableService()
         const executionState = new ExecutionState()
 
-        const resolvedProps = await variableService.resolve<StaticPropsValue<PiecePropertyMap>>({
+        const resolvedProps = await variableService.resolveOld<StaticPropsValue<PiecePropertyMap>>({
             unresolvedInput: input,
             executionState,
             logs: false,
@@ -42,7 +42,11 @@ export const triggerHelper = {
         const prefix = (params.hookType === TriggerHookType.TEST) ? 'test' : ''
         let scheduleOptions: ScheduleOptions | undefined = undefined
         const context = {
-            store: createContextStore(prefix, params.flowVersion.flowId),
+            store: createContextStore({
+                prefix,
+                flowId: params.flowVersion.flowId,
+                workerToken: params.workerToken!,
+            }),
             app: {
                 createListeners({ events, identifierKey, identifierValue }: Listener): void {
                     appListeners.push({ events, identifierValue, identifierKey })
@@ -96,6 +100,7 @@ export const triggerHelper = {
                         output: await trigger.test({
                             ...context,
                             files: createFilesService({
+                                workerToken: params.workerToken!,
                                 stepName: triggerName,
                                 flowId: params.flowVersion.flowId,
                                 type: 'db',
@@ -157,6 +162,7 @@ export const triggerHelper = {
                 const items = await trigger.run({
                     ...context,
                     files: createFilesService({
+                        workerToken: params.workerToken!,
                         flowId: params.flowVersion.flowId,
                         stepName: triggerName,
                         type: 'memory',

@@ -48,19 +48,19 @@ executionState.insertStep(
 
 describe('Variable Service', () => {
     test('Test resolve text with no variables', async () => {
-        expect(await variableService.resolve({ unresolvedInput: 'Hello world!', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: 'Hello world!', executionState, logs: false })).toEqual(
             'Hello world!',
         )
     })
 
     test('Test resolve text with double variables', async () => {
         expect(
-            await variableService.resolve({ unresolvedInput: 'Price is {{ trigger.price }}', executionState, logs: false }),
+            await variableService.resolveOld({ unresolvedInput: 'Price is {{ trigger.price }}', executionState, logs: false }),
         ).toEqual('Price is 6.4')
     })
 
     test('Test resolve object steps variables', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{trigger}}', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: '{{trigger}}', executionState, logs: false })).toEqual(
             {
                 items: [5, 'a'],
                 name: 'John',
@@ -70,20 +70,20 @@ describe('Variable Service', () => {
     })
 
     test('Test resolve steps variables', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{trigger.name}}', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: '{{trigger.name}}', executionState, logs: false })).toEqual(
             'John',
         )
     })
 
     test('Test resolve multiple variables', async () => {
         expect(
-            await variableService.resolve({ unresolvedInput: '{{trigger.name}} {{trigger.name}}', executionState, logs: false }),
+            await variableService.resolveOld({ unresolvedInput: '{{trigger.name}} {{trigger.name}}', executionState, logs: false }),
         ).toEqual('John John')
     })
 
     test('Test resolve variable array items', async () => {
         expect(
-            await variableService.resolve({
+            await variableService.resolveOld({
                 unresolvedInput:
           '{{trigger.items[0]}} {{trigger.items[1]}}',
                 executionState,
@@ -93,20 +93,20 @@ describe('Variable Service', () => {
     })
 
     test('Test resolve array variable', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{trigger.items}}', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: '{{trigger.items}}', executionState, logs: false })).toEqual(
             [5, 'a'],
         )
     })
 
     test('Test resolve integer from variables', async () => {
         expect(
-            await variableService.resolve({ unresolvedInput: '{{trigger.items[0]}}', executionState, logs: false }),
+            await variableService.resolveOld({ unresolvedInput: '{{trigger.items[0]}}', executionState, logs: false }),
         ).toEqual(5)
     })
 
     test('Test resolve text with undefined variables', async () => {
         expect(
-            await variableService.resolve({
+            await variableService.resolveOld({
                 unresolvedInput:
           'test {{configs.bar}} {{trigger.items[4]}}',
                 executionState,
@@ -116,17 +116,17 @@ describe('Variable Service', () => {
     })
 
     test('Test resolve empty text', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '', executionState, logs: false })).toEqual('')
+        expect(await variableService.resolveOld({ unresolvedInput: '', executionState, logs: false })).toEqual('')
     })
 
 
     test('Test resolve empty variable operator', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{}}', executionState, logs: false })).toEqual('')
+        expect(await variableService.resolveOld({ unresolvedInput: '{{}}', executionState, logs: false })).toEqual('')
     })
 
     test('Test resolve object', async () => {
         expect(
-            await variableService.resolve({
+            await variableService.resolveOld({
                 unresolvedInput:
         {
             input: {
@@ -142,26 +142,26 @@ describe('Variable Service', () => {
     })
 
     test('Test resolve boolean from variables', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{step_1.success}}', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: '{{step_1.success}}', executionState, logs: false })).toEqual(
             true,
         )
     })
 
     test('Test resolve addition from variables', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{trigger.price + 2 - 3}}', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: '{{trigger.price + 2 - 3}}', executionState, logs: false })).toEqual(
             6.4 + 2 - 3,
         )
     })
 
     test('Test resolve text with array variable', async () => {
         expect(
-            await variableService.resolve({ unresolvedInput: 'items are {{trigger.items}}', executionState, logs: false }),
+            await variableService.resolveOld({ unresolvedInput: 'items are {{trigger.items}}', executionState, logs: false }),
         ).toEqual('items are [5,"a"]')
     })
 
     test('Test resolve text with object variable', async () => {
         expect(
-            await variableService.resolve({
+            await variableService.resolveOld({
                 unresolvedInput:
           'values from trigger step: {{trigger}}',
                 executionState,
@@ -171,13 +171,13 @@ describe('Variable Service', () => {
     })
 
     test('Test use built-in Math Min function', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{Math.min(trigger.price + 2 - 3, 2)}}', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: '{{Math.min(trigger.price + 2 - 3, 2)}}', executionState, logs: false })).toEqual(
             2,
         )
     })
 
     test('Test use built-in Math Max function', async () => {
-        expect(await variableService.resolve({ unresolvedInput: '{{Math.max(trigger.price + 2, 2)}}', executionState, logs: false })).toEqual(
+        expect(await variableService.resolveOld({ unresolvedInput: '{{Math.max(trigger.price + 2, 2)}}', executionState, logs: false })).toEqual(
             8.4,
         )
     })
@@ -186,7 +186,7 @@ describe('Variable Service', () => {
         const input = {
             base64: 'memory://{"fileName":"hello.png","data":"iVBORw0KGgoAAAANSUhEUgAAAiAAAAC4CAYAAADaI1cbAAA0h0lEQVR4AezdA5AlPx7A8Zxt27Z9r5PB2SidWTqbr26S9Hr/tm3btu3723eDJD3r15ec17vzXr+Z"}',
         }
-        const resolvedInput = await variableService.resolve({
+        const resolvedInput = await variableService.resolveOld({
             unresolvedInput: input,
             executionState,
             logs: false,
@@ -200,7 +200,7 @@ describe('Variable Service', () => {
         const input = {
             base64: '{{step_2}}',
         }
-        const resolvedInput = await variableService.resolve({
+        const resolvedInput = await variableService.resolveOld({
             unresolvedInput: input,
             executionState,
             logs: false,
